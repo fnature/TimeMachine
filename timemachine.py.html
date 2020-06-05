@@ -1,0 +1,341 @@
+<html>
+<head>
+<title>timemachine.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.ln { color: rgb(0,0,0); font-weight: normal; font-style: normal; }
+.s0 { color: rgb(0,0,128); font-weight: bold; }
+.s1 { color: rgb(0,0,0); }
+.s2 { color: rgb(128,128,128); font-style: italic; }
+.s3 { color: rgb(0,128,128); font-weight: bold; }
+.s4 { color: rgb(0,0,255); }
+</style>
+</head>
+<BODY BGCOLOR="#ffffff">
+<TABLE CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#C0C0C0" >
+<TR><TD><CENTER>
+<FONT FACE="Arial, Helvetica" COLOR="#000000">
+timemachine.py</FONT>
+</center></TD></TR></TABLE>
+<pre>
+<span class="s0">import </span><span class="s1">argparse 
+</span><span class="s0">import </span><span class="s1">yaml 
+</span><span class="s0">import </span><span class="s1">re 
+</span><span class="s0">import </span><span class="s1">pickle 
+</span><span class="s0">import </span><span class="s1">sys 
+</span><span class="s0">import </span><span class="s1">subprocess 
+</span><span class="s0">import </span><span class="s1">logging 
+</span><span class="s0">from </span><span class="s1">logging.handlers </span><span class="s0">import </span><span class="s1">RotatingFileHandler 
+</span><span class="s0">import </span><span class="s1">datetime 
+</span><span class="s0">import </span><span class="s1">os 
+ 
+</span><span class="s2">#--------------------------------------FUNCTIONS--------------------------------------------</span><span class="s1"> 
+ 
+</span><span class="s2">#We check if a file can be accessed</span><span class="s1"> 
+</span><span class="s0">def </span><span class="s1">check_file(file,mode): 
+    </span><span class="s0">try</span><span class="s1">: 
+        </span><span class="s0">with </span><span class="s1">open(file,mode) </span><span class="s0">as </span><span class="s1">f: 
+            </span><span class="s0">pass</span><span class="s1"> 
+    </span><span class="s0">except </span><span class="s1">FileNotFoundError: 
+        logger.error(</span><span class="s3">&quot;file {0} not found&quot;</span><span class="s1">.format(file)) 
+        print(</span><span class="s3">&quot;file {0} not found&quot;</span><span class="s1">.format(file), file=sys.stderr) 
+        </span><span class="s0">return </span><span class="s4">0</span><span class="s1"> 
+    </span><span class="s0">except</span><span class="s1">: 
+        print(</span><span class="s3">&quot;file {0} cannot be accessed, error is {1}&quot;</span><span class="s1">.format(file,sys.exc_info()), file=sys.stderr) 
+        logger.error(</span><span class="s3">&quot;file {0} cannot be accessed, error is {1}&quot;</span><span class="s1">.format(file,sys.exc_info())) 
+        </span><span class="s0">return </span><span class="s4">0</span><span class="s1"> 
+    </span><span class="s0">else</span><span class="s1">: 
+        </span><span class="s0">return </span><span class="s4">1</span><span class="s1"> 
+ 
+</span><span class="s2">#We read and return the files from the configuration file</span><span class="s1"> 
+</span><span class="s0">def </span><span class="s1">read_files(configfile): 
+    </span><span class="s0">try</span><span class="s1">: 
+        </span><span class="s0">with </span><span class="s1">open(configfile,</span><span class="s3">&quot;r&quot;</span><span class="s1">) </span><span class="s0">as </span><span class="s1">f: 
+            files = yaml.load(f) 
+            </span><span class="s2">#We prefer not showing the list of files in the logs</span><span class="s1"> 
+            logger.debug(</span><span class="s3">&quot;Files are {0}&quot;</span><span class="s1">.format(files)) 
+            </span><span class="s0">return </span><span class="s1">files 
+    </span><span class="s0">except </span><span class="s1">FileNotFoundError: 
+        logger.error(</span><span class="s3">&quot;Configfile {0} not found, timemachine must now exit&quot;</span><span class="s1">.format(configfile)) 
+        print(</span><span class="s3">&quot;Config file {0} not found, timemachine must now exit&quot;</span><span class="s1">.format(configfile), file=sys.stderr) 
+        sys.exit(</span><span class="s4">1</span><span class="s1">) 
+ 
+</span><span class="s2">#We write a new list of files to the configuration file</span><span class="s1"> 
+</span><span class="s0">def </span><span class="s1">write_files(configfile,files): 
+    </span><span class="s0">if </span><span class="s1">check_file(configfile,</span><span class="s3">&quot;w&quot;</span><span class="s1">): 
+        </span><span class="s0">with </span><span class="s1">open(configfile,</span><span class="s3">&quot;w&quot;</span><span class="s1">) </span><span class="s0">as </span><span class="s1">f: 
+            yaml.dump(files, f, default_flow_style=</span><span class="s0">False</span><span class="s1">) 
+    </span><span class="s0">else</span><span class="s1">: 
+        logger.error(</span><span class="s3">&quot;timemachine must exit&quot;</span><span class="s1">) 
+        print(</span><span class="s3">&quot;timemachine must exit&quot;</span><span class="s1">, file=sys.stderr) 
+        sys.exit(</span><span class="s4">1</span><span class="s1">) 
+ 
+</span><span class="s2">#We check the configuration file and create a new one if necessary</span><span class="s1"> 
+</span><span class="s0">def </span><span class="s1">create_configfile(configfile,configfile_location): 
+    empty = </span><span class="s4">0</span><span class="s1"> 
+ 
+    </span><span class="s2">#We make sure the user has not specified a path in the configuration filename</span><span class="s1"> 
+    </span><span class="s0">if not </span><span class="s1">configfile.find(</span><span class="s3">&quot;/&quot;</span><span class="s1">) == -</span><span class="s4">1 </span><span class="s1">: 
+        logger.error(</span><span class="s3">&quot;the configuration filename must not contain a path, use option -cl to specify the path to the file&quot;</span><span class="s1">) 
+        logger.error(</span><span class="s3">&quot;timemachine must now exit&quot;</span><span class="s1">) 
+        print(</span><span class="s3">&quot;the configuration filename must not contain a path, use option -cl to specify the path to the file&quot;</span><span class="s1">, file=sys.stderr) 
+        print(</span><span class="s3">&quot;timemachine must now exit&quot;</span><span class="s1">, file=sys.stderr) 
+        sys.exit(</span><span class="s4">1</span><span class="s1">) 
+ 
+    </span><span class="s2">#We create the configuration file if it doesn't exit</span><span class="s1"> 
+    </span><span class="s2">#If it exists, then we check we can access the file. If we can't, then we exit.</span><span class="s1"> 
+    </span><span class="s0">if not </span><span class="s1">os.path.isfile(configfile_location+configfile): 
+        subprocess.call([</span><span class="s3">&quot;touch&quot;</span><span class="s1">,configfile_location+configfile]) 
+        empty=</span><span class="s4">1</span><span class="s1"> 
+    </span><span class="s0">elif not </span><span class="s1">check_file(configfile_location+configfile,</span><span class="s3">&quot;r&quot;</span><span class="s1">): 
+        </span><span class="s2">#this condition checks if the file can be accessed for reading.</span><span class="s1"> 
+        print(</span><span class="s3">&quot;timemachine must now exit&quot;</span><span class="s1">, file=sys.stderr) 
+        sys.exit(</span><span class="s4">1</span><span class="s1">) 
+ 
+    </span><span class="s2">#If the configuration file is empty, we add an empty list</span><span class="s1"> 
+    </span><span class="s0">if </span><span class="s1">os.path.getsize(configfile_location+configfile) == </span><span class="s4">0</span><span class="s1">: 
+        write_files(configfile_location+configfile,[]) 
+        empty=</span><span class="s4">1</span><span class="s1"> 
+ 
+    </span><span class="s2">#We check if the configuration file contains an empty list.</span><span class="s1"> 
+    </span><span class="s0">if </span><span class="s1">(read_files(configfile_location+configfile)) == []: 
+        empty=</span><span class="s4">1</span><span class="s1"> 
+ 
+    </span><span class="s2">#If the file size is 0 or if the file contains an empty list, then we notify that the configfile is empty.</span><span class="s1"> 
+    </span><span class="s0">if </span><span class="s1">empty: 
+        logger.error(</span><span class="s3">&quot;Configuration file is empty, please add files&quot;</span><span class="s1">) 
+        print(</span><span class="s3">&quot;Configuration file is empty, please add files&quot;</span><span class="s1">, file=sys.stderr) 
+ 
+ 
+</span><span class="s2">#We log and print the following parameters</span><span class="s1"> 
+</span><span class="s0">def </span><span class="s1">log(configfile,filepath,destination): 
+    logger.debug(</span><span class="s3">&quot;Config file is {0}&quot;</span><span class="s1">.format(configfile)) 
+    print(</span><span class="s3">&quot;Config file is {0}&quot;</span><span class="s1">.format(configfile)) 
+ 
+    logger.debug(</span><span class="s3">&quot;History of files recorded in {0}&quot;</span><span class="s1">.format(filepath)) 
+    print(</span><span class="s3">&quot;History of files recorded in {0}&quot;</span><span class="s1">.format(filepath)) 
+ 
+    logger.debug(</span><span class="s3">&quot;Destination of backups is {0}&quot;</span><span class="s1">.format(destination)) 
+    print(</span><span class="s3">&quot;Destination of backups is {0}&quot;</span><span class="s1">.format(destination)) 
+ 
+ 
+</span><span class="s2">#The function below opens and returns the pickle content of a file</span><span class="s1"> 
+</span><span class="s2">#Applied to our script : We read the dictionnary of recorded modification dates from a record file</span><span class="s1"> 
+</span><span class="s0">def </span><span class="s1">read_dates_recorded(filepath): 
+    </span><span class="s0">try</span><span class="s1">: 
+ 
+        </span><span class="s0">with </span><span class="s1">open(filepath,</span><span class="s3">&quot;rb&quot;</span><span class="s1">) </span><span class="s0">as </span><span class="s1">f: 
+            </span><span class="s0">return </span><span class="s1">pickle.load(f) 
+    </span><span class="s0">except </span><span class="s1">FileNotFoundError: 
+        </span><span class="s0">return </span><span class="s1">{} 
+ 
+</span><span class="s2">#We record a modification date into our record file</span><span class="s1"> 
+</span><span class="s0">def </span><span class="s1">write_dates_recorded(file, date,dates_recorded,filepath): 
+</span><span class="s2">#We enter a new record or modifiy an existing record in the dictionary dates_recorded</span><span class="s1"> 
+</span><span class="s2"># and we write that dictionnary to the record file filepath</span><span class="s1"> 
+ 
+    dates_recorded[file] = date 
+    </span><span class="s0">with </span><span class="s1">open(filepath,</span><span class="s3">&quot;wb&quot;</span><span class="s1">) </span><span class="s0">as </span><span class="s1">f: 
+        logger.debug(</span><span class="s3">&quot;Writing dates_recorded to {0}&quot;</span><span class="s1">.format(filepath)) 
+        print(</span><span class="s3">&quot;Writing dates_recorded to {0}&quot;</span><span class="s1">.format(filepath)) 
+        </span><span class="s0">return </span><span class="s1">pickle.dump(dates_recorded, f) 
+ 
+</span><span class="s2">#We verify if we can access a destination path</span><span class="s1"> 
+</span><span class="s0">def </span><span class="s1">check_path(destination,logging): 
+</span><span class="s2">#The logging parameter allows us to have no error when check_path is called the first time</span><span class="s1"> 
+</span><span class="s2">#Reminder : The first time the function is called, the logger is not instanciated so we should not log.</span><span class="s1"> 
+ 
+    </span><span class="s0">if not </span><span class="s1">os.path.isdir(destination): 
+        print(</span><span class="s3">&quot;The folder {0} was not found, timemachine must now exit&quot;</span><span class="s1">.format(destination), file=sys.stderr) 
+        </span><span class="s0">if </span><span class="s1">logging: </span><span class="s2">#We don't log the first time check_path is called in the script</span><span class="s1"> 
+            logger.error(</span><span class="s3">&quot;The folder {0} was not found, timemachine must now exit&quot;</span><span class="s1">.format(destination)) 
+        sys.exit(</span><span class="s4">1</span><span class="s1">) 
+    </span><span class="s0">elif not </span><span class="s1">os.access(destination, os.W_OK): 
+        print(</span><span class="s3">&quot;The folder {0} cannot be accessed with write permission, timemachine must now exit&quot;</span><span class="s1">.format(destination), file=sys.stderr) 
+        </span><span class="s0">if </span><span class="s1">logging: </span><span class="s2">#We don't log the first time check_path is called in the script</span><span class="s1"> 
+            logger.error(</span><span class="s3">&quot;The folder {0} cannot be accessed with write permission, timemachine must now exit&quot;</span><span class="s1">.format(destination)) 
+        sys.exit(</span><span class="s4">1</span><span class="s1">) 
+ 
+</span><span class="s2">#We copy a file to a specified folder.</span><span class="s1"> 
+</span><span class="s2">#The copied filename has the last modification date appended to it.This allows us to maintain unique backup files.</span><span class="s1"> 
+</span><span class="s0">def </span><span class="s1">copy_file(file,destination,timestamp): 
+    check_path(destination,</span><span class="s4">1</span><span class="s1">)</span><span class="s2">#we exit the script if the backup destination can't be accessed</span><span class="s1"> 
+ 
+    timestamp_formated = str(datetime.datetime.fromtimestamp(timestamp)) 
+ 
+    </span><span class="s2">#We extract the filename only from the original file specified.</span><span class="s1"> 
+    </span><span class="s2">#Example : we extract file1.txt from /home/admin/file1.txt</span><span class="s1"> 
+    </span><span class="s2">#That allow use to copy file1.txt to the destination folder.</span><span class="s1"> 
+    filelist = file.split(</span><span class="s3">&quot;/&quot;</span><span class="s1">) 
+    filename = filelist[-</span><span class="s4">1</span><span class="s1">] 
+    subprocess.call([</span><span class="s3">&quot;cp&quot;</span><span class="s1">,file,destination+timestamp_formated+filename]) </span><span class="s2">#We append the timestamp to the destination backup file</span><span class="s1"> 
+    logger.debug(</span><span class="s3">&quot;{0} was copied to {1}&quot;</span><span class="s1">.format(file,destination+timestamp_formated+filename)) 
+    print(</span><span class="s3">&quot;{0} was copied to {1}&quot;</span><span class="s1">.format(file,destination+timestamp_formated+filename)) 
+ 
+</span><span class="s2">#We format the destination folder</span><span class="s1"> 
+</span><span class="s0">def </span><span class="s1">format_destination(destination): 
+</span><span class="s2">#We add a '/' at the end of destination folder if not specified</span><span class="s1"> 
+</span><span class="s2">#It is useful for example when copying a backup file in check_for_modif</span><span class="s1"> 
+</span><span class="s2">#It allows us to append the timestamp to the destination backup file and not have formating error.</span><span class="s1"> 
+</span><span class="s2">#It is also used for everytime we concatenate destination+configfile and destination+</span><span class="s1"> 
+ 
+    </span><span class="s0">if not </span><span class="s1">destination[-</span><span class="s4">1</span><span class="s1">] == </span><span class="s3">&quot;/&quot;</span><span class="s1">: 
+        destination = destination + </span><span class="s3">&quot;/&quot;</span><span class="s1"> 
+    </span><span class="s0">return </span><span class="s1">destination 
+ 
+</span><span class="s2">#We check if file has been modified and take a backup of the file if that's the case</span><span class="s1"> 
+</span><span class="s0">def </span><span class="s1">check_for_modif(file,destination,dates_recorded): 
+    </span><span class="s2">#We make sure the file can be read</span><span class="s1"> 
+    </span><span class="s0">if </span><span class="s1">check_file(file,</span><span class="s3">&quot;r&quot;</span><span class="s1">): 
+        timestamp=os.path.getmtime(file) 
+        </span><span class="s2">#Here we check if there is an entry already in the dictionnary for that file.</span><span class="s1"> 
+        </span><span class="s0">if </span><span class="s1">dates_recorded.get(file) </span><span class="s0">is not None</span><span class="s1">: 
+            </span><span class="s2">#We check if the file has been modified.</span><span class="s1"> 
+            </span><span class="s2">#We compare the current timestamp with the recorded timestamp in the dictionnary.</span><span class="s1"> 
+            </span><span class="s0">if </span><span class="s1">timestamp &gt; dates_recorded[file]: 
+                logger.debug(</span><span class="s3">&quot;{0} has been modified since last backup, we run new backup&quot;</span><span class="s1">.format(file)) 
+                print(</span><span class="s3">&quot;{0} has been modified since last backup, we run new backup&quot;</span><span class="s1">.format(file)) 
+                </span><span class="s2">#We copy the file to the destination folder</span><span class="s1"> 
+                </span><span class="s2">#The copied file will have the timestamp appended to its filename.</span><span class="s1"> 
+                copy_file(file,destination,timestamp) 
+                </span><span class="s2">#We then record that file and timestamp into the dictionnary and write into the record file</span><span class="s1"> 
+                write_dates_recorded(file,timestamp,dates_recorded,destination+DATE_RECORD_FILE) 
+            </span><span class="s0">else</span><span class="s1">: 
+                logger.debug(</span><span class="s3">&quot;{0} has not been modified&quot;</span><span class="s1">.format(file)) 
+                print(</span><span class="s3">&quot;{0} has not been modified&quot;</span><span class="s1">.format(file)) 
+        </span><span class="s0">else</span><span class="s1">:</span><span class="s2">#We have no existing entry in the dictionnary, we then do the 1st backup of the file</span><span class="s1"> 
+            logger.debug(</span><span class="s3">&quot;we run 1st backup of {0}&quot;</span><span class="s1">.format(file)) 
+            print(</span><span class="s3">&quot;we run 1st backup of {0}&quot;</span><span class="s1">.format(file)) 
+            </span><span class="s2">#We copy the file to the destination folder</span><span class="s1"> 
+            </span><span class="s2">#The copied file will have the timestamp appended to its filename.</span><span class="s1"> 
+            copy_file(file,destination,timestamp) 
+            </span><span class="s2">#We then record that file and timestamp into the dictionnary and write into the record file.</span><span class="s1"> 
+            write_dates_recorded(file,timestamp,dates_recorded,destination+DATE_RECORD_FILE) 
+ 
+ 
+ 
+</span><span class="s2">#We print a sorted list of files being observed from the configuration file specified</span><span class="s1"> 
+</span><span class="s0">def </span><span class="s1">print_files(configfile): 
+    logger.debug(</span><span class="s3">&quot;The command to list files being observed was called&quot;</span><span class="s1">) 
+    files = read_files(configfile) 
+    files.sort() 
+    print(</span><span class="s3">&quot;The list of files being observed is&quot;</span><span class="s1">) 
+    </span><span class="s0">for </span><span class="s1">file </span><span class="s0">in </span><span class="s1">files: 
+        print(file) 
+ 
+ 
+</span><span class="s2">#We add a file into the configuration file</span><span class="s1"> 
+</span><span class="s0">def </span><span class="s1">add_file(configfile,files,file): 
+    logger.debug(</span><span class="s3">&quot;The command to add a file was called&quot;</span><span class="s1">) 
+    </span><span class="s2">#Condition where the file was not already in the configuration file.</span><span class="s1"> 
+    </span><span class="s2"># We then append that file to the list files, and write that list into the configuration file.</span><span class="s1"> 
+    </span><span class="s0">if </span><span class="s1">file </span><span class="s0">not in </span><span class="s1">files: 
+        files.append(file) 
+        write_files(configfile,files) 
+        print(</span><span class="s3">&quot;{1} was added to configfile {0}&quot;</span><span class="s1">.format(configfile,file)) 
+        logger.debug(</span><span class="s3">&quot;{1} was added to configfile {0}&quot;</span><span class="s1">.format(configfile,file)) 
+    </span><span class="s0">else</span><span class="s1">:</span><span class="s2">#Condition where the file is already in the configuration file.</span><span class="s1"> 
+        </span><span class="s2"># We want a uniq list of files, so we don't append the file again.</span><span class="s1"> 
+        print(</span><span class="s3">&quot;{1} is already in configfile {0}&quot;</span><span class="s1">.format(configfile,file), file=sys.stderr) 
+        logger.error(</span><span class="s3">&quot;{1} is already in configfile {0}&quot;</span><span class="s1">.format(configfile,file)) 
+        sys.exit(</span><span class="s4">1</span><span class="s1">) 
+ 
+</span><span class="s2">#we remove a file from the configuration list</span><span class="s1"> 
+</span><span class="s0">def </span><span class="s1">remove_file(configfile,files,file): 
+    logger.debug(</span><span class="s3">&quot;The command to remove a file was called&quot;</span><span class="s1">) 
+    </span><span class="s0">try</span><span class="s1">: 
+        files.remove(file) 
+    </span><span class="s0">except </span><span class="s1">Exception </span><span class="s0">as </span><span class="s1">e: 
+        </span><span class="s2">#If we couldn't remove the file from the list, we alert and exit.</span><span class="s1"> 
+        s = str(e) 
+        </span><span class="s2">#Condition where the file to remove is not in the list.</span><span class="s1"> 
+        </span><span class="s0">if </span><span class="s1">s == </span><span class="s3">&quot;list.remove(x): x not in list&quot;</span><span class="s1">: 
+            print(</span><span class="s3">&quot;{0} is not in the configuration list&quot;</span><span class="s1">.format(file), file=sys.stderr) 
+            logger.error(</span><span class="s3">&quot;{0} is not in the configuration list&quot;</span><span class="s1">.format(file)) 
+        </span><span class="s0">else</span><span class="s1">:</span><span class="s2">#Condition where the file can't be removed due to another error.</span><span class="s1"> 
+            print(</span><span class="s3">&quot;{0} could not be removed, error is {1}&quot;</span><span class="s1">.format(file,s), file=sys.stderr) 
+            logger.error(</span><span class="s3">&quot;{0} could not be removed, error is {1}&quot;</span><span class="s1">.format(file,s)) 
+        sys.exit(</span><span class="s4">1</span><span class="s1">) 
+    </span><span class="s2">#If we have no exited we write the new list into the configuration file</span><span class="s1"> 
+    write_files(configfile,files) 
+    print(</span><span class="s3">&quot;{1} was removed from configfile {0}&quot;</span><span class="s1">.format(configfile,file)) 
+    logger.debug(</span><span class="s3">&quot;{1} was removed from configfile {0}&quot;</span><span class="s1">.format(configfile,file)) 
+ 
+ 
+ 
+</span><span class="s2">#-----------------------------------------BODY--------------------------------------------</span><span class="s1"> 
+ 
+ 
+</span><span class="s2">#DATE_RECORD_FILE : filename used to records modification dates</span><span class="s1"> 
+DATE_RECORD_FILE = </span><span class="s3">&quot;records_sent.dat&quot;</span><span class="s1"> 
+ 
+</span><span class="s2">#Instantiation of command line arguments</span><span class="s1"> 
+parser = argparse.ArgumentParser( description=</span><span class="s3">'Backup files on modifications - Use Crontab to schedule'</span><span class="s1">) 
+parser.add_argument(</span><span class="s3">'-c'</span><span class="s1">, </span><span class="s3">'--configfile'</span><span class="s1">, default=</span><span class="s3">&quot;config.dat&quot;</span><span class="s1">, help=</span><span class="s3">'specify the configuration filename. Only a filename without the path is allowed. Default is config.dat'</span><span class="s1">) 
+parser.add_argument(</span><span class="s3">'-cl'</span><span class="s1">, </span><span class="s3">'--configfile_location'</span><span class="s1">, default=</span><span class="s3">&quot;.&quot;</span><span class="s1">, help=</span><span class="s3">'specify the location path of the configuration filename. Default is </span><span class="s0">\'</span><span class="s3">.</span><span class="s0">\'</span><span class="s3">'</span><span class="s1">) 
+parser.add_argument(</span><span class="s3">'-d'</span><span class="s1">, </span><span class="s3">'--destination'</span><span class="s1">, default=</span><span class="s3">&quot;.&quot;</span><span class="s1">, help=</span><span class="s3">'specify the destination path where files should be backed up. Default is </span><span class="s0">\'</span><span class="s3">.</span><span class="s0">\'</span><span class="s3">'</span><span class="s1">) 
+parser.add_argument(</span><span class="s3">'-l'</span><span class="s1">, </span><span class="s3">'--list'</span><span class="s1">, action=</span><span class="s3">&quot;store_true&quot;</span><span class="s1">, help=</span><span class="s3">'list the files being observed from the configuration file specified'</span><span class="s1">) 
+parser.add_argument(</span><span class="s3">'-a'</span><span class="s1">, </span><span class="s3">'--add'</span><span class="s1">, help=</span><span class="s3">'add a file to the list of files being observed. The filename may contain the absolute path'</span><span class="s1">) 
+parser.add_argument(</span><span class="s3">'-r'</span><span class="s1">, </span><span class="s3">'--remove'</span><span class="s1">,help=</span><span class="s3">'remove a file to the list of files being observed. The filename may contain the absolute path. Note that -l takes precedence over -a and -a takes precedence over -r'</span><span class="s1">) 
+ 
+</span><span class="s2">#We read comand line arguments</span><span class="s1"> 
+args = parser.parse_args() 
+ 
+</span><span class="s2">#We format the variables</span><span class="s1"> 
+destination = format_destination(args.destination) </span><span class="s2">#We format the destination string</span><span class="s1"> 
+configfile_location = format_destination(args.configfile_location) </span><span class="s2">#We format the destination string</span><span class="s1"> 
+configfile=configfile_location+args.configfile </span><span class="s2">#We add the path provided to the configfile name</span><span class="s1"> 
+record_file=destination+DATE_RECORD_FILE </span><span class="s2">#We add the path provided to the history of records file.</span><span class="s1"> 
+ 
+</span><span class="s2">#We first make sure that the path to the configuration file can be accessed and be written to.</span><span class="s1"> 
+</span><span class="s2">#  If not we exit the script.</span><span class="s1"> 
+</span><span class="s2">#Calling it here allows us to write logs into that path with no subsequent error.</span><span class="s1"> 
+</span><span class="s2">#The second parameter 0 ensures that we don't try to log.</span><span class="s1"> 
+check_path(configfile_location,</span><span class="s4">0</span><span class="s1">) 
+ 
+</span><span class="s2">#Instantiation of logging</span><span class="s1"> 
+LOG_FILENAME = configfile_location+</span><span class="s3">'timemachine.log'</span><span class="s1"> 
+rotating_handler = RotatingFileHandler(LOG_FILENAME, 
+                    maxBytes=</span><span class="s4">10000000</span><span class="s1">, 
+                    backupCount=</span><span class="s4">3</span><span class="s1">) 
+formatter = logging.Formatter(</span><span class="s3">'%(asctime)s %(levelname)-8s %(message)s'</span><span class="s1">) 
+rotating_handler.setFormatter(formatter) 
+ 
+logger = logging.getLogger(</span><span class="s3">'demoapp'</span><span class="s1">) 
+logger.setLevel(logging.DEBUG) 
+logger.addHandler(rotating_handler) 
+ 
+</span><span class="s2">#Print and log</span><span class="s1"> 
+logger.debug(</span><span class="s3">&quot;...........Timemachine started...........&quot;</span><span class="s1">) 
+print(</span><span class="s3">&quot;...........Timemachine started...........&quot;</span><span class="s1">) 
+ 
+</span><span class="s2">#We create the configuration file if it doesn't exist or is empty</span><span class="s1"> 
+create_configfile(args.configfile,configfile_location) 
+ 
+</span><span class="s2">#We read the list of files from the configuration file</span><span class="s1"> 
+files = read_files(configfile) 
+ 
+</span><span class="s2">#We print and log to the user the name of the configfile, history of records, destination.</span><span class="s1"> 
+log(configfile,record_file,destination) 
+ 
+</span><span class="s2">#We read the history of files recorded</span><span class="s1"> 
+dates_recorded = read_dates_recorded(record_file) 
+ 
+</span><span class="s2">#We perform the queries of the user.</span><span class="s1"> 
+</span><span class="s2">#It is based on the command line arguments provided by the user</span><span class="s1"> 
+</span><span class="s0">if </span><span class="s1">args.list: 
+    print_files(configfile) </span><span class="s2">#We print the list of files from configfile</span><span class="s1"> 
+</span><span class="s0">elif </span><span class="s1">args.add: 
+    add_file(configfile,files,args.add) </span><span class="s2">#We add a file to the list of files in configfile</span><span class="s1"> 
+</span><span class="s0">elif </span><span class="s1">args.remove: 
+    remove_file(configfile,files,args.remove)</span><span class="s2">#We remove a file to the list of files in configfile</span><span class="s1"> 
+</span><span class="s0">else</span><span class="s1">: 
+    </span><span class="s0">for </span><span class="s1">file </span><span class="s0">in </span><span class="s1">files: </span><span class="s2">#We check for modifications and backup the modified files</span><span class="s1"> 
+        check_for_modif(file,destination,dates_recorded) 
+ 
+ 
+ 
+ 
+</span></pre>
+</body>
+</html>
